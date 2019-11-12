@@ -1,0 +1,11 @@
+name: video_loop_finder
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - opencv
+  - notebook
+  - matplotlib
+  - jupyter
+prefix: /hd_data/anaconda3/envs/video_loop_finder
+
