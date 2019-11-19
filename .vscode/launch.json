@@ -10,6 +10,11 @@
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal",
+            "args": [
+                "/hd_data/Dropbox (BBC)/Videos/VID_2019_09_26_14_02_58_20191015155545.mp4",
+                "990",
+                "1800"
+            ],
             "internalConsoleOptions": "openOnSessionStart"
         }
     ]

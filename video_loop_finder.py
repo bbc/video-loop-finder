@@ -1,6 +1,34 @@
-#! /usr/bin/env/python3
+#! /usr/bin/env python3
 
-"""Program to find a loop in a repeating video, such as a concentric mosaic dataset
+"""Video Loop Finder
+
+USAGE:
+    video_loop_finder.py [options] VIDEO_PATH [[START_FRAME_IDX] DURATION_HINT]
+
+ARGUMENTS:
+    VIDEO_PATH          Path to a video file or printf-style escaped path to image
+                        sequence
+    START_FRAME_IDX     Index of first frame of loop [default: 0]
+    DURATION_HINT       Estimated duration of loop in frames [default: video duration]
+
+OPTIONS:
+    -r WIDTH --resolution=WIDTH     Image width in pixels used in computations. Set to
+                                    None to use full original image resolution
+                                    [default: 256]
+    -f PIXELS --flow-filter=PIXELS  Filters out optical flow vectors that,
+                                    when chaining forward and backward flows together,
+                                    do not map back onto themselves within PIXELS. Set
+                                    to OFF to disable filtering. [default: 0.2]
+    -d --debug                      Enable more verbose logging and plot intermediate
+                                    results
+    -h --help                       Show this help text
+
+
+
+DESCRIPTION:
+
+Finds a loop in a repeating video, such as a concentric mosaic dataset, stored in
+VIDEO_PATH.
 
 This script will find the best matching frame pair in terms of lowest sum of absolute
 pixel differences and localise the end frame relative to the actual beginning/end of the
@@ -16,6 +44,8 @@ import numpy as np
 import logging
 from enum import Enum
 from matplotlib import pyplot as plt
+from docopt import docopt
+from schema import Schema, Use, And, Or, SchemaError
 
 
 class VideoLoopDirection(Enum):
@@ -88,8 +118,8 @@ class VideoLoopFinder:
         logging.info(f"Input loaded: video_duration={self.video_duration:.0f}")
 
         # Seek to start_frame_idx
-        self.start_frame_idx = start_frame_idx
-        self.start_frame = self._seek(start_frame_idx)
+        self.start_frame_idx = 0 if start_frame_idx is None else start_frame_idx
+        self.start_frame = self._seek(self.start_frame_idx)
 
         # Initialise optical flow algorithm
         self.flow_algo = cv2.optflow.createOptFlow_Farneback()
@@ -296,6 +326,8 @@ class VideoLoopFinder:
         fractional_frame_count = np.nanmedian(
                                     xflow_magnitudes[0][xflow_magnitude_sum != 0]
                                     / xflow_magnitude_sum[xflow_magnitude_sum != 0])
+        logging.info(f"Frame 0 lies at {100*fractional_frame_count:.0f}%"
+                     " between frames N-1 and N")
         if self.debug:
             plt.imshow(xflow_magnitudes[0] / xflow_magnitude_sum)
             plt.colorbar()
@@ -308,12 +340,34 @@ class VideoLoopFinder:
 
 if __name__ == "__main__":
 
+    opts = docopt(__doc__)
+    schema = Schema({'VIDEO_PATH': str,
+                     'START_FRAME_IDX': Or(None, And(Use(int), lambda f: f >= 0)),
+                     'DURATION_HINT': Or(None, And(Use(int), lambda d: d > 0)),
+                     '--resolution': And(Use(int), lambda r: r > 0),
+                     '--flow-filter': Or(And('off', Use(lambda t: None)),
+                                         And(Use(float), lambda t: t >= 0)),
+                     str: object})
+    try:
+        opts = schema.validate(opts)
+    except SchemaError as e:
+        exit(e)
+
+    print(opts)
+
     vlf = VideoLoopFinder(
-        "/home/florians/Videos/VID_2019_09_26_14_02_58_20191015155545.mp4",
-        start_frame_idx=33 * 30,
-        duration_hint=60 * 30,
-        resolution=256,
-        flow_filter_threshold=.2
+        opts['VIDEO_PATH'],
+        start_frame_idx=opts['START_FRAME_IDX'],
+        duration_hint=opts['DURATION_HINT'],
+        resolution=opts['--resolution'],
+        flow_filter_threshold=opts['--flow-filter']
     )
-    print(vlf.find_closest_end_frame())
-    print(vlf.localise_end_frame())
+    end_frame_idx = vlf.find_closest_end_frame()
+    end_frame_position = vlf.localise_end_frame()
+
+    print(f'''
+Loop detected
+Start frame: {opts['START_FRAME_IDX']}
+End frame: {end_frame_idx}
+End frame position: {end_frame_position}
+    ''')

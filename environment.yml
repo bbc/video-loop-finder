@@ -7,5 +7,7 @@ dependencies:
   - notebook
   - matplotlib
   - jupyter
+  - docopt
+  - schema
 prefix: /hd_data/anaconda3/envs/video_loop_finder
 
