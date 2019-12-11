@@ -9,5 +9,6 @@ dependencies:
   - jupyter
   - docopt
   - schema
+  - ffmpeg-python
 prefix: /hd_data/anaconda3/envs/video_loop_finder
 

@@ -24,7 +24,8 @@
                 // "--flow-filter=off",
                 // "--range=$((30*25))",
                 // "--width=32",
-                "-i"
+                "-o test.mp4",
+                "--ffmpeg-opts=-an -b:v 500"
             ],
             "internalConsoleOptions": "openOnSessionStart",
             // "justMyCode": false
