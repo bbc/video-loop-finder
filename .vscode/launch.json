@@ -9,13 +9,25 @@
             "type": "python",
             "request": "launch",
             "program": "${file}",
-            "console": "integratedTerminal",
+            "console": "internalConsole",
+            // "args": [
+            //     "/hd_data/Dropbox (BBC)/Videos/VID_2019_09_26_14_02_58_20191015155545.mp4",
+            //     // "--flow-filter=inf",
+            //     "990",
+            //     "1800",
+            //     "-d"
+            // ],
             "args": [
-                "/hd_data/Dropbox (BBC)/Videos/VID_2019_09_26_14_02_58_20191015155545.mp4",
-                "990",
-                "1800"
+                "/hd_data/Dropbox (BBC)/Videos/Full CBBC capture footage/frames_png/cbbc_frame_%04d.png",
+                "125",
+                "2100",
+                // "--flow-filter=off",
+                // "--range=$((30*25))",
+                // "--width=32",
+                "-i"
             ],
-            "internalConsoleOptions": "openOnSessionStart"
+            "internalConsoleOptions": "openOnSessionStart",
+            // "justMyCode": false
         }
     ]
 }

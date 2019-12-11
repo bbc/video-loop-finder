@@ -20,6 +20,7 @@ OPTIONS:
                                     when chaining forward and backward flows together,
                                     do not map back onto themselves within PIXELS. Set
                                     to 'off' to disable filtering. [default: 0.2]
+    -i --interactive                Enable interactive alignment of start and end frames
     -d --debug                      Enable more verbose logging and plot intermediate
                                     results
     -h --help                       Show this help text
@@ -76,7 +77,8 @@ class VideoLoopFinder:
                  duration_hint=None, *,
                  resolution=256,
                  flow_filter_threshold=0.2,
-                 debug=False):
+                 debug=False,
+                 interactive=False):
         """ Constructor
 
         Args:
@@ -94,8 +96,11 @@ class VideoLoopFinder:
                                       (default: 0.2)
             debug                   — Enable more verbose logging and plot intermediate
                                       results
+            interactive             — Enable interactive alignment of start and end
+                                      frames
         """
 
+        self.interactive = interactive
         self.debug = debug
         if debug:
             logger.setLevel(logging.DEBUG)
@@ -161,7 +166,9 @@ class VideoLoopFinder:
         return frame
 
     def _compute_pixel_difference(self, other_frame):
-        return np.sum(np.abs(self.start_frame - other_frame))
+        """ Compute mean absulute pixel difference between start_frame and other_frame
+        """
+        return np.mean(np.abs(self.start_frame - other_frame))
 
     def _find_video_direction(self, frame1=None, frame2=None):
         """ Determine the direction the video is spinning in between two frames
@@ -207,7 +214,7 @@ class VideoLoopFinder:
 
     def find_closest_end_frame(self, search_range=50):
         """ Find frame most similar to start frame that still lies before it, and sets
-        end_grame_idx and end_frames member variables where
+        end_frame_idx and end_frames member variables where
             end_frame_idx ← N-1
             end_frames[0] ← frame N-1
             end_frames[1] ← frame N
@@ -220,16 +227,18 @@ class VideoLoopFinder:
         """
         idx_from = max(1, self.end_frame_hint_idx - search_range)
         idx_to = min(self.video_duration - 2, self.end_frame_hint_idx + search_range)
+        end_frame_range = np.arange(idx_from, idx_to + 1)
 
         # Iterate over video with 3-frame window, searching for closest match
         prev_frame = None
-        curr_frame = None
+        curr_frame = self._seek(idx_from - 1)
         next_frame = self._seek(idx_from)
-        min_sad = np.inf
+        min_mad = np.inf
         min_idx = idx_from
         min_frames = tuple()  # 3 frames centered on current minimum
-        sad_list = []
-        for i in range(idx_from + 1, idx_to + 2):
+        mads = np.empty_like(end_frame_range)
+        self.end_frame_cache = []
+        for i in end_frame_range:
             # Read new frame
             success, frame = self.video.read()
             frame = cv2.cvtColor(
@@ -244,31 +253,112 @@ class VideoLoopFinder:
             curr_frame = next_frame
             next_frame = frame
 
-            # Test for minimum SAD
-            sad = self._compute_pixel_difference(curr_frame)
-            if self.debug:
-                sad_list.append(sad)
-            if sad and sad < min_sad:
-                min_sad = sad
+            # Keep frames for interactive mode
+            if self.interactive:
+                self.end_frame_cache.append(curr_frame)
+
+            # Test for minimum MAD
+            mad = self._compute_pixel_difference(curr_frame)
+            if self.debug or self.interactive:
+                mads[i - end_frame_range[0]] = mad
+            if mad and mad < min_mad:
+                min_mad = mad
                 min_idx = i
                 min_frames = prev_frame, curr_frame, next_frame
-
-        if self.debug:
-            plt.figure(f"Dissimilarity with start frame (index={self.start_frame_idx})")
-            plt.plot(range(idx_from, idx_to + 1),
-                     np.array(sad_list) / np.prod(self.resolution))
-            plt.xlabel("end frame index")
-            plt.ylabel("Mean absolute pixel difference")
 
         if self.loop_direction == self._find_video_direction(min_frames[1],
                                                              self.start_frame):
             self.end_frames = [min_frames[1], min_frames[2]]
             self.end_frame_idx = min_idx
-            return min_idx
         else:
             self.end_frames = [min_frames[0], min_frames[1]]
             self.end_frame_idx = min_idx - 1
-            return min_idx - 1
+
+        if self.debug | self.interactive:
+            self._plot_dissimilarity(end_frame_range, mads)
+
+        return self.end_frame_idx
+
+    def _plot_dissimilarity(self, end_frame_range, mad_values):
+        """ Plot mean absolute difference of pixels between two frames
+        """
+        fig = plt.figure(
+            "Dissimilarity with start frame",
+            figsize=(15, 7))
+        ax = fig.subplots(1, 2)
+        mad_curve = ax[0].plot(end_frame_range, mad_values)
+        marker = ax[0].plot(
+            self.end_frame_idx,
+            mad_values[self.end_frame_idx - end_frame_range[0]],
+            'r.')
+        ax[0].set_title(f"Start frame idx: {self.start_frame_idx}")
+        ax[0].set_xlabel(f"end frame index: {self.end_frame_idx}")
+        ax[0].set_ylabel("Mean absolute pixel difference")
+        im = ax[1].imshow(np.abs(self.start_frame - self.end_frames[0]), cmap='jet')
+        plt.colorbar(im)
+
+        if self.interactive:
+            ax[0].set_title(
+                f"Start frame idx: {self.start_frame_idx}\n"
+                "Adjust with Ctrl(+Shift)+Left/Right"
+            )
+            ax[0].set_xlabel(
+                f"end frame index: {self.end_frame_idx}\n"
+                "Adjust with (Shift+)Left/Right")
+            ax[1].imshow(np.abs(self.start_frame - self.end_frames[0]), cmap='jet')
+
+            def key_handler(event):
+                if event.key == 'left':
+                    self.end_frame_idx -= 1
+                elif event.key == 'shift+left':
+                    self.end_frame_idx -= 10
+                elif event.key == 'right':
+                    self.end_frame_idx += 1
+                elif event.key == 'shift+right':
+                    self.end_frame_idx += 10
+
+                elif event.key == 'ctrl+left':
+                    self.start_frame_idx -= 1
+                elif event.key == 'shift+ctrl+left':
+                    self.start_frame_idx -= 10
+                elif event.key == 'ctrl+right':
+                    self.start_frame_idx += 1
+                elif event.key == 'shift+ctrl+right':
+                    self.start_frame_idx += 10
+
+                elif event.key in ['enter', 'escape']:
+                    plt.close()
+                else:
+                    return
+
+                if 'ctrl' in event.key:
+                    self.start_frame_idx %= self.video_duration
+                    self.start_frame = self._seek(self.start_frame_idx)
+                    for i, frame in enumerate(self.end_frame_cache):
+                        mad_values[i] = self._compute_pixel_difference(frame)
+                    mad_curve[0].set_ydata(mad_values)
+                    ax[0].set_title(
+                        f"Start frame idx: {self.start_frame_idx}\n"
+                        "Adjust with Ctrl(+Shift)+Left/Right"
+                    )
+                else:
+                    self.end_frame_idx = np.clip(self.end_frame_idx,
+                                                 end_frame_range[0],
+                                                 end_frame_range[-1])
+                    self.end_frames = self.end_frame_cache[
+                                        self.end_frame_idx - end_frame_range[0]:
+                                        self.end_frame_idx - end_frame_range[0] + 2]
+                    ax[0].set_xlabel(
+                        f"end frame index: {self.end_frame_idx}\n"
+                        "Adjust with (Shift+)Left/Right")
+                marker[0].set_data(
+                    self.end_frame_idx,
+                    mad_values[self.end_frame_idx - end_frame_range[0]])
+                ax[1].imshow(np.abs(self.start_frame - self.end_frames[0]), cmap='jet')
+                fig.canvas.draw()
+
+            fig.canvas.mpl_connect('key_press_event', key_handler)
+            plt.show()
 
     @staticmethod
     def filter_optical_flow(fwd_flow, bwd_flow, threshold, *, verbose=False):
@@ -408,9 +498,11 @@ if __name__ == "__main__":
         duration_hint=opts['DURATION_HINT'],
         resolution=opts['--width'],
         flow_filter_threshold=opts['--flow-filter'],
-        debug=opts['--debug']
+        debug=opts['--debug'],
+        interactive=opts['--interactive']
     )
     end_frame_idx = vlf.find_closest_end_frame(search_range=opts['--range'])
+
     end_frame_position = vlf.localise_end_frame()
 
     print(f'''
