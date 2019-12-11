@@ -23,6 +23,9 @@ OPTIONS:
     -i --interactive                Enable interactive alignment of start and end frames
     -d --debug                      Enable more verbose logging and plot intermediate
                                     results
+    -o --outfile=OUTFILE            Save trimmed version of video in OUTFILE
+    --ffmpeg-opts=OPTS              Pass options OPTS (one quoted string) to ffmpeg,
+                                    e.g. --ffmpeg-opts="-b:v 1000 -c:v h264 -an"
     -h --help                       Show this help text
 
 
@@ -48,6 +51,9 @@ from enum import Enum
 from matplotlib import pyplot as plt
 from docopt import docopt
 from schema import Schema, Use, And, Or, SchemaError
+import ffmpeg
+import os
+from textwrap import dedent
 
 
 # Set up custom logger
@@ -277,7 +283,7 @@ class VideoLoopFinder:
         if self.debug | self.interactive:
             self._plot_dissimilarity(end_frame_range, mads)
 
-        return self.end_frame_idx
+        return self.start_frame_idx, self.end_frame_idx
 
     def _plot_dissimilarity(self, end_frame_range, mad_values):
         """ Plot mean absolute difference of pixels between two frames
@@ -472,21 +478,41 @@ class VideoLoopFinder:
 
         return full_frame_count / (full_frame_count + fractional_frame_count)
 
+    @staticmethod
+    def trim_video(in_filepath, from_idx, to_idx, out_filepath):
+        """Trim input video to [from_idx, to_idx], both inclusive"""
+        (
+            ffmpeg.input(in_filepath)
+            .trim(start_frame=from_idx, end_frame=to_idx + 1)
+            .output(out_filepath)
+            .run()
+        )
+
 
 if __name__ == "__main__":
 
     opts = docopt(__doc__)
-    schema = Schema({'VIDEO_PATH': str,
-                     'START_FRAME_IDX': Or(None, And(Use(int), lambda f: f >= 0)),
-                     'DURATION_HINT': Or(None, And(Use(int), lambda d: d > 0)),
-                     '--range': And(Use(int), lambda r: r >= 0),
-                     '--width': And(Use(int), lambda w: w >= 0),
-                     '--flow-filter': Or(
-                                And(lambda f: f.lower().strip() == 'off',
-                                    Use(lambda f: None)),
-                                And(Use(float), lambda t: t >= 0),
-                                error="Valid --flow-filter values: 'off' or float > 0"),
-                     str: object})
+    schema = Schema({
+        'VIDEO_PATH': Use(str.strip),
+        'START_FRAME_IDX': Or(None, And(Use(int), lambda f: f >= 0)),
+        'DURATION_HINT': Or(None, And(Use(int), lambda d: d > 0)),
+        '--range': And(Use(int), lambda r: r >= 0),
+        '--width': And(Use(int), lambda w: w >= 0),
+        '--flow-filter': Or(
+                And(lambda f: f.lower().strip() == 'off',
+                    Use(lambda f: None)),
+                And(Use(float), lambda t: t >= 0),
+                error="Valid --flow-filter values: 'off' or float > 0"),
+        '--outfile': Or(None,
+                        And(Use(str.strip), lambda f: not os.path.exists(f)),
+                        error="OUTFILE already exists"),
+        '--ffmpeg-opts': Use(
+            lambda opts:
+                {kv[0]: ' '.join(kv[1:]) if len(kv) > 1 else None
+                    for opt in opts.split('-')
+                    if len(opt) > 0
+                    for kv in [opt.split()]}),
+        str: object})
     try:
         opts = schema.validate(opts)
     except SchemaError as e:
@@ -501,16 +527,26 @@ if __name__ == "__main__":
         debug=opts['--debug'],
         interactive=opts['--interactive']
     )
-    end_frame_idx = vlf.find_closest_end_frame(search_range=opts['--range'])
+    start_frame_idx, end_frame_idx = (
+        vlf.find_closest_end_frame(search_range=opts['--range']))
 
     end_frame_position = vlf.localise_end_frame()
 
-    print(f'''
-Loop detected
-Start frame: {opts['START_FRAME_IDX']}
-End frame: {end_frame_idx}
-End frame position: {end_frame_position}
-    ''')
+    print(dedent(f'''
+        Loop detected
+        Start frame: {start_frame_idx}
+        End frame: {end_frame_idx}
+        End frame position: {end_frame_position}
+    '''))
+
+    if opts['--outfile']:
+        logger.info(f"Exporting trimmed video to {opts['--outfile']}...")
+        vlf.trim_video(
+            opts['VIDEO_PATH'],
+            start_frame_idx,
+            end_frame_idx,
+            opts['--outfile'])
+        logger.info("...done")
 
     if opts['--debug']:
         plt.show()
