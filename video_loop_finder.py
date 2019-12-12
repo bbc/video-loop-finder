@@ -158,7 +158,7 @@ class VideoLoopFinder:
         # Will be populated by find_closest_end_frame
         self.end_frames = None
 
-    def _seek(self, frame_idx, downsample=True, grayscale=True):
+    def _seek(self, frame_idx, downsample=True, grayscale=True, normalise=True):
         self.video.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
         success, frame = self.video.read()
         if not success:
@@ -168,13 +168,15 @@ class VideoLoopFinder:
             frame = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
         if downsample:
             frame = cv2.resize(frame, self.resolution, interpolation=cv2.INTER_AREA)
+        if normalise:
+            frame = cv2.normalize(frame.astype(float), None)
 
         return frame
 
     def _compute_pixel_difference(self, other_frame):
         """ Compute mean absulute pixel difference between start_frame and other_frame
         """
-        return np.mean(np.abs(self.start_frame - other_frame))
+        return np.abs(self.start_frame - other_frame).mean()
 
     def _find_video_direction(self, frame1=None, frame2=None):
         """ Determine the direction the video is spinning in between two frames
@@ -242,18 +244,19 @@ class VideoLoopFinder:
         min_mad = np.inf
         min_idx = idx_from
         min_frames = tuple()  # 3 frames centered on current minimum
-        mads = np.empty_like(end_frame_range)
+        mads = np.empty_like(end_frame_range, dtype=float)
         self.end_frame_cache = []
         for i in end_frame_range:
             # Read new frame
             success, frame = self.video.read()
-            frame = cv2.cvtColor(
-                       cv2.resize(frame, self.resolution, interpolation=cv2.INTER_AREA),
-                       cv2.COLOR_RGB2GRAY)
             if not success:
                 msg = f"Failed to read frame {i}"
                 logger.fatal(msg)
                 raise RuntimeError(msg)
+            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+            frame = cv2.resize(frame, self.resolution, interpolation=cv2.INTER_AREA)
+            frame = cv2.normalize(frame.astype(float), None)
+
             # Shift frames along
             prev_frame = curr_frame
             curr_frame = next_frame
