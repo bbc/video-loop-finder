@@ -3,7 +3,7 @@
 """Video Loop Finder
 
 USAGE:
-    video_loop_finder.py [options] VIDEO_PATH [[START_FRAME_IDX] DURATION_HINT]
+    video_loop_finder.py [options] VIDEO_PATH [START_FRAME_IDX [DURATION_HINT]]
 
 ARGUMENTS:
     VIDEO_PATH          Path to a video file or printf-style escaped path to image
