@@ -487,6 +487,7 @@ class VideoLoopFinder:
         (
             ffmpeg.input(in_filepath)
             .trim(start_frame=from_idx, end_frame=to_idx + 1)
+            .setpts('PTS-STARTPTS')
             .output(out_filepath)
             .run()
         )
