@@ -78,14 +78,18 @@ class VideoLoopFinder:
         relative_end_frame_position = vlf.localise_end_frame()
     """
 
-    def __init__(self, video_path,
-                 start_frame_idx=0,
-                 duration_hint=None, *,
-                 resolution=256,
-                 flow_filter_threshold=0.2,
-                 debug=False,
-                 interactive=False):
-        """ Constructor
+    def __init__(
+        self,
+        video_path,
+        start_frame_idx=0,
+        duration_hint=None,
+        *,
+        resolution=256,
+        flow_filter_threshold=0.2,
+        debug=False,
+        interactive=False,
+    ):
+        """Constructor
 
         Args:
             video_path              – Path to video file or printf-style image sequence
@@ -150,8 +154,9 @@ class VideoLoopFinder:
         if self.vertical:
             logger.info("The camera appears to move vertically")
             logger.info(
-              "Looping direction appears to be "
-              f"{'down' if self.loop_direction == VideoLoopDirection.CW else 'up'}ward")
+                "Looping direction appears to be "
+                f"{'down' if self.loop_direction == VideoLoopDirection.CW else 'up'}ward"
+            )
         else:
             logger.info(f"Looping direction appears to be {self.loop_direction.name}")
 
@@ -174,12 +179,11 @@ class VideoLoopFinder:
         return frame
 
     def _compute_pixel_difference(self, other_frame):
-        """ Compute mean absulute pixel difference between start_frame and other_frame
-        """
+        """Compute mean absulute pixel difference between start_frame and other_frame"""
         return np.abs(self.start_frame - other_frame).mean()
 
     def _find_video_direction(self, frame1=None, frame2=None):
-        """ Determine the direction the video is spinning in between two frames
+        """Determine the direction the video is spinning in between two frames
 
         Args:
             frame1      – First frame or its index (defaults to start frame)
@@ -208,7 +212,8 @@ class VideoLoopFinder:
                 flow_forward,
                 flow_backward,
                 self.flow_filter_threshold,
-                verbose=self.debug).filled()
+                verbose=self.debug,
+            ).filled()
 
         x_flow = np.nanmedian(flow_forward[..., 0])
         y_flow = np.nanmedian(flow_forward[..., 1])
@@ -221,7 +226,7 @@ class VideoLoopFinder:
             return VideoLoopDirection.CCW, vertical_flow
 
     def find_closest_end_frame(self, search_range=50):
-        """ Find frame most similar to start frame that still lies before it, and sets
+        """Find frame most similar to start frame that still lies before it, and sets
         end_frame_idx and end_frames member variables where
             end_frame_idx ← N-1
             end_frames[0] ← frame N-1
@@ -275,8 +280,9 @@ class VideoLoopFinder:
                 min_idx = i
                 min_frames = prev_frame, curr_frame, next_frame
 
-        if self.loop_direction == self._find_video_direction(min_frames[1],
-                                                             self.start_frame):
+        if self.loop_direction == self._find_video_direction(
+            min_frames[1], self.start_frame
+        ):
             self.end_frames = [min_frames[1], min_frames[2]]
             self.end_frame_idx = min_idx
         else:
@@ -289,21 +295,19 @@ class VideoLoopFinder:
         return self.start_frame_idx, self.end_frame_idx
 
     def _plot_dissimilarity(self, end_frame_range, mad_values):
-        """ Plot mean absolute difference of pixels between two frames
-        """
-        fig = plt.figure(
-            "Dissimilarity with start frame",
-            figsize=(15, 7))
+        """Plot mean absolute difference of pixels between two frames"""
+        fig = plt.figure("Dissimilarity with start frame", figsize=(15, 7))
         ax = fig.subplots(1, 2)
         mad_curve = ax[0].plot(end_frame_range, mad_values)
         marker = ax[0].plot(
             self.end_frame_idx,
             mad_values[self.end_frame_idx - end_frame_range[0]],
-            'r.')
+            "r.",
+        )
         ax[0].set_title(f"Start frame idx: {self.start_frame_idx}")
         ax[0].set_xlabel(f"end frame index: {self.end_frame_idx}")
         ax[0].set_ylabel("Mean absolute pixel difference")
-        im = ax[1].imshow(np.abs(self.start_frame - self.end_frames[0]), cmap='jet')
+        im = ax[1].imshow(np.abs(self.start_frame - self.end_frames[0]), cmap="jet")
         plt.colorbar(im)
 
         if self.interactive:
@@ -313,34 +317,35 @@ class VideoLoopFinder:
             )
             ax[0].set_xlabel(
                 f"end frame index: {self.end_frame_idx}\n"
-                "Adjust with (Shift+)Left/Right")
-            ax[1].imshow(np.abs(self.start_frame - self.end_frames[0]), cmap='jet')
+                "Adjust with (Shift+)Left/Right"
+            )
+            ax[1].imshow(np.abs(self.start_frame - self.end_frames[0]), cmap="jet")
 
             def key_handler(event):
-                if event.key == 'left':
+                if event.key == "left":
                     self.end_frame_idx -= 1
-                elif event.key == 'shift+left':
+                elif event.key == "shift+left":
                     self.end_frame_idx -= 10
-                elif event.key == 'right':
+                elif event.key == "right":
                     self.end_frame_idx += 1
-                elif event.key == 'shift+right':
+                elif event.key == "shift+right":
                     self.end_frame_idx += 10
 
-                elif event.key == 'ctrl+left':
+                elif event.key == "ctrl+left":
                     self.start_frame_idx -= 1
-                elif event.key == 'shift+ctrl+left':
+                elif event.key == "shift+ctrl+left":
                     self.start_frame_idx -= 10
-                elif event.key == 'ctrl+right':
+                elif event.key == "ctrl+right":
                     self.start_frame_idx += 1
-                elif event.key == 'shift+ctrl+right':
+                elif event.key == "shift+ctrl+right":
                     self.start_frame_idx += 10
 
-                elif event.key in ['enter', 'escape']:
+                elif event.key in ["enter", "escape"]:
                     plt.close()
                 else:
                     return
 
-                if 'ctrl' in event.key:
+                if "ctrl" in event.key:
                     self.start_frame_idx %= self.video_duration
                     self.start_frame = self._seek(self.start_frame_idx)
                     for i, frame in enumerate(self.end_frame_cache):
@@ -351,51 +356,56 @@ class VideoLoopFinder:
                         "Adjust with Ctrl(+Shift)+Left/Right"
                     )
                 else:
-                    self.end_frame_idx = np.clip(self.end_frame_idx,
-                                                 end_frame_range[0],
-                                                 end_frame_range[-1])
+                    self.end_frame_idx = np.clip(
+                        self.end_frame_idx, end_frame_range[0], end_frame_range[-1]
+                    )
                     self.end_frames = self.end_frame_cache[
-                                        self.end_frame_idx - end_frame_range[0]:
-                                        self.end_frame_idx - end_frame_range[0] + 2]
+                        self.end_frame_idx
+                        - end_frame_range[0] : self.end_frame_idx
+                        - end_frame_range[0]
+                        + 2
+                    ]
                     ax[0].set_xlabel(
                         f"end frame index: {self.end_frame_idx}\n"
-                        "Adjust with (Shift+)Left/Right")
+                        "Adjust with (Shift+)Left/Right"
+                    )
                 marker[0].set_data(
                     self.end_frame_idx,
-                    mad_values[self.end_frame_idx - end_frame_range[0]])
-                ax[1].imshow(np.abs(self.start_frame - self.end_frames[0]), cmap='jet')
+                    mad_values[self.end_frame_idx - end_frame_range[0]],
+                )
+                ax[1].imshow(np.abs(self.start_frame - self.end_frames[0]), cmap="jet")
                 fig.canvas.draw()
 
-            fig.canvas.mpl_connect('key_press_event', key_handler)
+            fig.canvas.mpl_connect("key_press_event", key_handler)
             plt.show()
 
     @staticmethod
     def filter_optical_flow(fwd_flow, bwd_flow, threshold, *, verbose=False):
         """Remove unreliable flow vectors from fwd_flow
 
-        Follows the flow from the previous to the next frame (fwd_flow)
-        and from the next back to the previous frame (bwd_flow), and
-        checks if the final pixel location is within threshold of the
-        initial location. If not, the fwd_flow vector at this pixel is
-        set to (None,None) to mark it as unreliable.
+            Follows the flow from the previous to the next frame (fwd_flow)
+            and from the next back to the previous frame (bwd_flow), and
+            checks if the final pixel location is within threshold of the
+            initial location. If not, the fwd_flow vector at this pixel is
+            set to (None,None) to mark it as unreliable.
 
-    Args:
-        fwd_flow    – optical flow from previous to next frame
-                      which will be filtered
-        bwd_flow    – optical flow from next to previous frame
-        threshold   – maximum deviation in pixels that the
-                      concatenation of fwd_flow aand bwd_flow
-                      may exhibit before classified unreliable
-        verbose     — Show intermediate results
-    Returns:
-        A masked_array the same size as fwd_flow with inconsistent flow values masked
-        out
-    """
+        Args:
+            fwd_flow    – optical flow from previous to next frame
+                          which will be filtered
+            bwd_flow    – optical flow from next to previous frame
+            threshold   – maximum deviation in pixels that the
+                          concatenation of fwd_flow aand bwd_flow
+                          may exhibit before classified unreliable
+            verbose     — Show intermediate results
+        Returns:
+            A masked_array the same size as fwd_flow with inconsistent flow values masked
+            out
+        """
         height, width, depth = fwd_flow.shape
 
         if bwd_flow.shape != (height, width, depth) or depth != 2:
             raise RuntimeError(
-                'Both input flows must have the same size and have 2 channels'
+                "Both input flows must have the same size and have 2 channels"
             )
 
         fwd_flow = np.ma.masked_array(fwd_flow, copy=True, fill_value=np.nan)
@@ -403,10 +413,16 @@ class VideoLoopFinder:
         img_coords_x, img_coords_y = np.meshgrid(np.arange(width), np.arange(height))
         img_coords = np.dstack((img_coords_x, img_coords_y)).astype(np.float32)
         coords_in_next = img_coords + fwd_flow
-        coords_in_prev = cv2.remap(bwd_flow,
-                                   coords_in_next[..., 0],
-                                   coords_in_next[..., 1],
-                                   cv2.INTER_CUBIC, None) + coords_in_next
+        coords_in_prev = (
+            cv2.remap(
+                bwd_flow,
+                coords_in_next[..., 0],
+                coords_in_next[..., 1],
+                cv2.INTER_CUBIC,
+                None,
+            )
+            + coords_in_next
+        )
         error = np.linalg.norm(coords_in_prev - img_coords, axis=-1)
         if verbose:
             plt.figure("Histogram of optical flow relocalisation error")
@@ -418,7 +434,8 @@ class VideoLoopFinder:
         if fwd_flow.mask.mean() > 0.5:
             logger.warning(
                 "More than 50% of optical flow vectors have been filtered out. "
-                "Consider increasing --flow-filter threshold")
+                "Consider increasing --flow-filter threshold"
+            )
 
         return fwd_flow
 
@@ -439,22 +456,25 @@ class VideoLoopFinder:
 
         # Compute optical flows 0→(N-1) and 0→N which should point in opposite
         # directions
-        flows = [self.flow_algo.calc(self.start_frame,
-                                     self.end_frames[0], None),
-                 self.flow_algo.calc(self.start_frame,
-                                     self.end_frames[1], None)]
+        flows = [
+            self.flow_algo.calc(self.start_frame, self.end_frames[0], None),
+            self.flow_algo.calc(self.start_frame, self.end_frames[1], None),
+        ]
 
         if self.flow_filter_threshold is not None:
-            bwd_flows = [self.flow_algo.calc(self.end_frames[0],
-                                             self.start_frame, None),
-                         self.flow_algo.calc(self.end_frames[1],
-                                             self.start_frame, None)]
-            flows = [self.filter_optical_flow(flows[i],
-                                              bwd_flows[i],
-                                              self.flow_filter_threshold,
-                                              verbose=self.debug)
-                     .filled()
-                     for i in range(2)]
+            bwd_flows = [
+                self.flow_algo.calc(self.end_frames[0], self.start_frame, None),
+                self.flow_algo.calc(self.end_frames[1], self.start_frame, None),
+            ]
+            flows = [
+                self.filter_optical_flow(
+                    flows[i],
+                    bwd_flows[i],
+                    self.flow_filter_threshold,
+                    verbose=self.debug,
+                ).filled()
+                for i in range(2)
+            ]
 
         # We are only interested in the horizontal components
         flow_magnitudes = [np.abs(f[..., int(self.vertical)]) for f in flows]
@@ -462,33 +482,37 @@ class VideoLoopFinder:
 
         full_frame_count = self.end_frame_idx - self.start_frame_idx
         fractional_frame_count = np.nanmedian(
-                                    flow_magnitudes[0][flow_magnitude_sum != 0]
-                                    / flow_magnitude_sum[flow_magnitude_sum != 0])
+            flow_magnitudes[0][flow_magnitude_sum != 0]
+            / flow_magnitude_sum[flow_magnitude_sum != 0]
+        )
         logger.info(
             f"Frame {self.start_frame_idx} lies at {100*fractional_frame_count:.0f}%"
-            f" between frames {self.end_frame_idx} and {self.end_frame_idx + 1}")
+            f" between frames {self.end_frame_idx} and {self.end_frame_idx + 1}"
+        )
         if self.debug:
             plt.figure("Relative flow from end to start frame")
             plt.imshow(flow_magnitudes[0] / flow_magnitude_sum)
             plt.colorbar()
             plt.figure("Histogram of relative flow measurements")
             relative_flow_magnitude = flow_magnitudes[0] / flow_magnitude_sum
-            plt.hist(relative_flow_magnitude[~np.isnan(relative_flow_magnitude)],
-                     bins=100)
+            plt.hist(
+                relative_flow_magnitude[~np.isnan(relative_flow_magnitude)], bins=100
+            )
             plt.xlabel(
                 f"Relative position of frame {self.start_frame_idx} "
-                f"between frames {self.end_frame_idx} and {self.end_frame_idx + 1}")
+                f"between frames {self.end_frame_idx} and {self.end_frame_idx + 1}"
+            )
 
         return full_frame_count / (full_frame_count + fractional_frame_count)
 
     @staticmethod
-    def trim_video(in_filepath, from_idx, to_idx, out_filepath):
+    def trim_video(in_filepath, from_idx, to_idx, out_filepath, ffmpeg_options):
         """Trim input video to [from_idx, to_idx], both inclusive"""
         (
             ffmpeg.input(in_filepath)
             .trim(start_frame=from_idx, end_frame=to_idx + 1)
-            .setpts('PTS-STARTPTS')
-            .output(out_filepath)
+            .setpts("PTS-STARTPTS")
+            .output(out_filepath, **ffmpeg_options)
             .run()
         )
 
@@ -496,61 +520,77 @@ class VideoLoopFinder:
 if __name__ == "__main__":
 
     opts = docopt(__doc__)
-    schema = Schema({
-        'VIDEO_PATH': Use(str.strip),
-        'START_FRAME_IDX': Or(None, And(Use(int), lambda f: f >= 0)),
-        'DURATION_HINT': Or(None, And(Use(int), lambda d: d > 0)),
-        '--range': And(Use(int), lambda r: r >= 0),
-        '--width': And(Use(int), lambda w: w >= 0),
-        '--flow-filter': Or(
-                And(lambda f: f.lower().strip() == 'off',
-                    Use(lambda f: None)),
+    schema = Schema(
+        {
+            "VIDEO_PATH": Use(str.strip),
+            "START_FRAME_IDX": Or(None, And(Use(int), lambda f: f >= 0)),
+            "DURATION_HINT": Or(None, And(Use(int), lambda d: d > 0)),
+            "--range": And(Use(int), lambda r: r >= 0),
+            "--width": And(Use(int), lambda w: w >= 0),
+            "--flow-filter": Or(
+                And(lambda f: f.lower().strip() == "off", Use(lambda f: None)),
                 And(Use(float), lambda t: t >= 0),
-                error="Valid --flow-filter values: 'off' or float > 0"),
-        '--outfile': Or(None,
-                        And(Use(str.strip), lambda f: not os.path.exists(f)),
-                        error="OUTFILE already exists"),
-        '--ffmpeg-opts': Or(
-            None, Use(lambda opts:
-                      {kv[0]: ' '.join(kv[1:]) if len(kv) > 1 else None
-                       for opt in opts.split('-')
-                       if len(opt) > 0
-                       for kv in [opt.split()]})),
-        str: object})
+                error="Valid --flow-filter values: 'off' or float > 0",
+            ),
+            "--outfile": Or(
+                None,
+                And(Use(str.strip), lambda f: not os.path.exists(f)),
+                error="OUTFILE already exists",
+            ),
+            "--ffmpeg-opts": Use(
+                lambda opts: {
+                    kv[0]: " ".join(kv[1:]) if len(kv) > 1 else None
+                    for opt in opts.split("-")
+                    if len(opt) > 0
+                    for kv in [opt.split()]
+                }
+                if opts
+                else {}
+            ),
+            str: object,
+        }
+    )
     try:
         opts = schema.validate(opts)
     except SchemaError as e:
         exit(e)
 
     vlf = VideoLoopFinder(
-        opts['VIDEO_PATH'],
-        start_frame_idx=opts['START_FRAME_IDX'],
-        duration_hint=opts['DURATION_HINT'],
-        resolution=opts['--width'],
-        flow_filter_threshold=opts['--flow-filter'],
-        debug=opts['--debug'],
-        interactive=opts['--interactive']
+        opts["VIDEO_PATH"],
+        start_frame_idx=opts["START_FRAME_IDX"],
+        duration_hint=opts["DURATION_HINT"],
+        resolution=opts["--width"],
+        flow_filter_threshold=opts["--flow-filter"],
+        debug=opts["--debug"],
+        interactive=opts["--interactive"],
     )
-    start_frame_idx, end_frame_idx = (
-        vlf.find_closest_end_frame(search_range=opts['--range']))
+    start_frame_idx, end_frame_idx = vlf.find_closest_end_frame(
+        search_range=opts["--range"]
+    )
 
     end_frame_position = vlf.localise_end_frame()
 
-    print(dedent(f'''
+    print(
+        dedent(
+            f"""
         Loop detected
         Start frame: {start_frame_idx}
         End frame: {end_frame_idx}
         End frame position: {end_frame_position}
-    '''))
+    """
+        )
+    )
 
-    if opts['--outfile']:
+    if opts["--outfile"]:
         logger.info(f"Exporting trimmed video to {opts['--outfile']}...")
         vlf.trim_video(
-            opts['VIDEO_PATH'],
+            opts["VIDEO_PATH"],
             start_frame_idx,
             end_frame_idx,
-            opts['--outfile'])
+            opts["--outfile"],
+            opts["--ffmpeg-opts"],
+        )
         logger.info("...done")
 
-    if opts['--debug']:
+    if opts["--debug"]:
         plt.show()
