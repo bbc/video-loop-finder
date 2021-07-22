@@ -1,7 +1,7 @@
 name: video_loop_finder
 channels:
-  - conda-forge
   - defaults
+  - conda-forge
 dependencies:
   - opencv
   - notebook
@@ -10,5 +10,5 @@ dependencies:
   - docopt
   - schema
   - ffmpeg-python
-prefix: /hd_data/anaconda3/envs/video_loop_finder
+  - ffmpeg=4.2=h1a5d6f3_0
 
