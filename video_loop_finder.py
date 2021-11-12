@@ -12,21 +12,27 @@ ARGUMENTS:
     DURATION_HINT       Estimated duration of loop in frames [default: video duration]
 
 OPTIONS:
-    -r RANGE --range=RANGE          Search for end frame ±RANGE frames around
-                                    START_FRAME + DURATION_HINT [default: 50]
-    -w WIDTH --width=WIDTH          Image width in pixels used in computations. Set to 0
-                                    to use full original image resolution [default: 256]
-    -f PIXELS --flow-filter=PIXELS  Filters out optical flow vectors that,
-                                    when chaining forward and backward flows together,
-                                    do not map back onto themselves within PIXELS. Set
-                                    to 'off' to disable filtering. [default: 0.2]
-    -i --interactive                Enable interactive alignment of start and end frames
-    -d --debug                      Enable more verbose logging and plot intermediate
-                                    results
-    -o --outfile=OUTFILE            Save trimmed version of video in OUTFILE
-    --ffmpeg-opts=OPTS              Pass options OPTS (one quoted string) to ffmpeg,
-                                    e.g. --ffmpeg-opts="-b:v 1000 -c:v h264 -an"
-    -h --help                       Show this help text
+    -r RANGE --range=RANGE              Search for end frame ±RANGE frames around
+                                        START_FRAME + DURATION_HINT [default: 50]
+    -b RANGE --match-brightness=RANGE   Adjust START_FRAME (and matching end frame)
+                                        position within ±RANGE such that the average
+                                        brightness difference between them is mimimum
+                                        [default: 0]
+    -w WIDTH --width=WIDTH              Image width in pixels used in computations. Set
+                                        to 0 to use full original image resolution
+                                        [default: 256]
+    -f PIXELS --flow-filter=PIXELS      Filters out optical flow vectors that, when
+                                        chaining forward and backward flows together, do
+                                        not map back onto themselves within PIXELS. Set
+                                        to 'off' to disable filtering. [default: 0.2]
+    -i --interactive                    Enable interactive alignment of start and end
+                                        frames
+    -d --debug                          Enable more verbose logging and plot interme-
+                                        diate results
+    -o --outfile=OUTFILE                Save trimmed version of video in OUTFILE
+    --ffmpeg-opts=OPTS                  Pass options OPTS (one quoted string) to ffmpeg,
+                                        e.g. --ffmpeg-opts="-b:v 1000 -c:v h264 -an"
+    -h --help                           Show this help text
 
 
 
@@ -86,6 +92,7 @@ class VideoLoopFinder:
         *,
         resolution=256,
         flow_filter_threshold=0.2,
+        match_brightness_range=None,
         debug=False,
         interactive=False,
     ):
@@ -115,6 +122,8 @@ class VideoLoopFinder:
         if debug:
             logger.setLevel(logging.DEBUG)
 
+        self.match_brightness_range = match_brightness_range
+
         # Open video / image sequence and determine its properties
         self.video = cv2.VideoCapture(video_path)
         self.video_duration = int(self.video.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -133,9 +142,9 @@ class VideoLoopFinder:
         self.resolution = (resolution, int(height / width * resolution))
 
         if duration_hint is None:
-            self.end_frame_hint_idx = self.video_duration - 1
+            self.end_frame_idx = self.video_duration - 1
         else:
-            self.end_frame_hint_idx = (
+            self.end_frame_idx = (
                 min(self.video_duration, start_frame_idx + duration_hint) - 1
             )
 
@@ -238,24 +247,24 @@ class VideoLoopFinder:
         Returns:
             Index of the last frame of the loop (i.e. index N-1)
         """
-        idx_from = max(1, self.end_frame_hint_idx - search_range)
-        idx_to = min(self.video_duration - 2, self.end_frame_hint_idx + search_range)
+        idx_from = max(1, self.end_frame_idx - search_range)
+        idx_to = min(self.video_duration - 2, self.end_frame_idx + search_range)
         end_frame_range = np.arange(idx_from, idx_to + 1)
 
         # Iterate over video with 3-frame window, searching for closest match
         prev_frame = None
         curr_frame = self._seek(idx_from - 1)
         next_frame = self._seek(idx_from)
-        min_mad = np.inf
+        min_diff = np.inf
         min_idx = idx_from
         min_frames = tuple()  # 3 frames centered on current minimum
         mads = np.empty_like(end_frame_range, dtype=float)
         self.end_frame_cache = []
-        for i in end_frame_range:
+        for i in range(len(end_frame_range)):
             # Read new frame
             success, frame = self.video.read()
             if not success:
-                msg = f"Failed to read frame {i}"
+                msg = f"Failed to read frame {end_frame_range[i]}"
                 logger.fatal(msg)
                 raise RuntimeError(msg)
             frame = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
@@ -274,10 +283,10 @@ class VideoLoopFinder:
             # Test for minimum MAD
             mad = self._compute_pixel_difference(curr_frame)
             if self.debug or self.interactive:
-                mads[i - end_frame_range[0]] = mad
-            if mad and mad < min_mad:
-                min_mad = mad
-                min_idx = i
+                mads[i] = mad
+            if mad and mad < min_diff:
+                min_diff = mad
+                min_idx = end_frame_range[i]
                 min_frames = prev_frame, curr_frame, next_frame
 
         if self.loop_direction == self._find_video_direction(
@@ -290,25 +299,107 @@ class VideoLoopFinder:
             self.end_frame_idx = min_idx - 1
 
         if self.debug | self.interactive:
-            self._plot_dissimilarity(end_frame_range, mads)
+            self._plot_dissimilarity(
+                end_frame_range, mads, "Mean absolute pixel difference"
+            )
 
         return self.start_frame_idx, self.end_frame_idx
 
-    def _plot_dissimilarity(self, end_frame_range, mad_values):
+    def match_brightness(self):
+        """Search around start_frame_idx and end_frame_idx for the best match in
+        brighness"""
+
+        # Set search range as ±match_brightness_range, truncated by video length
+        search_range = range(
+            max(1, self.start_frame_idx - self.match_brightness_range)
+            - self.start_frame_idx,
+            min(
+                self.video_duration - 1,
+                self.end_frame_idx + self.match_brightness_range + 1,
+            )
+            - self.end_frame_idx,
+        )
+
+        # Compute average brightness in neighbourhood of start frame
+        start_brightness = np.empty(len(search_range))
+        frame = self._seek(
+            self.start_frame_idx + search_range[0],
+            downsample=False,
+            grayscale=True,
+            normalise=False,
+        )
+        start_brightness[0] = np.mean(frame)
+        for i in range(1, len(search_range)):
+            success, frame = self.video.read()
+            if not success:
+                msg = f"Failed to read frame {search_range[i]}"
+                logger.fatal(msg)
+                raise RuntimeError(msg)
+            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+            start_brightness[i] = np.mean(frame)
+
+        # Compute average brightness in neighbourhood of end frame
+        end_brightness = np.empty(len(search_range))
+        frame = self._seek(
+            self.end_frame_idx + search_range[0],
+            downsample=False,
+            grayscale=True,
+            normalise=False,
+        )
+        end_brightness[0] = np.mean(frame)
+        for i in range(1, len(search_range)):
+            success, frame = self.video.read()
+            if not success:
+                msg = f"Failed to read frame {search_range[i]}"
+                logger.fatal(msg)
+                raise RuntimeError(msg)
+            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+            end_brightness[i] = np.mean(frame)
+
+        # Exhausive search for global minimum of pairwise brightness difference
+        brightness_difference = np.abs(start_brightness - end_brightness)
+        min_idx = np.argmin(brightness_difference)
+
+        self.start_frame_idx = self.start_frame_idx + search_range[min_idx]
+        self.start_frame = self._seek(self.start_frame_idx)
+        self.end_frame_idx = self.end_frame_idx + search_range[min_idx]
+
+        logger.info(
+            f"Frame pair closest in brightness: {self.start_frame_idx}, {self.end_frame_idx}"
+        )
+
+        if self.interactive:
+            old_end_frame_idx = self.end_frame_idx
+            self._plot_dissimilarity(
+                self.end_frame_idx + search_range - search_range[min_idx],
+                brightness_difference,
+                "Absolute average brightness difference",
+                False,
+            )
+            self.start_frame_idx += self.end_frame_idx - old_end_frame_idx
+            self.start_frame = self._seek(self.start_frame_idx)
+
+        return self.start_frame_idx, self.end_frame_idx
+
+    def _plot_dissimilarity(
+        self, end_frame_range, y_values, y_label, show_frame_diff=True
+    ):
         """Plot mean absolute difference of pixels between two frames"""
         fig = plt.figure("Dissimilarity with start frame", figsize=(15, 7))
-        ax = fig.subplots(1, 2)
-        mad_curve = ax[0].plot(end_frame_range, mad_values)
+        ax = fig.subplots(1, 2) if show_frame_diff else [plt.axes()]
+        curve = ax[0].plot(end_frame_range, y_values)
         marker = ax[0].plot(
             self.end_frame_idx,
-            mad_values[self.end_frame_idx - end_frame_range[0]],
+            y_values[self.end_frame_idx - end_frame_range[0]],
             "r.",
         )
         ax[0].set_title(f"Start frame idx: {self.start_frame_idx}")
         ax[0].set_xlabel(f"end frame index: {self.end_frame_idx}")
-        ax[0].set_ylabel("Mean absolute pixel difference")
-        im = ax[1].imshow(np.abs(self.start_frame - self.end_frames[0]), cmap="jet")
-        plt.colorbar(im)
+        ax[0].set_ylabel(y_label)
+
+        if show_frame_diff:
+            im = ax[1].imshow(np.abs(self.start_frame - self.end_frames[0]), cmap="jet")
+            plt.colorbar(im)
 
         if self.interactive:
             ax[0].set_title(
@@ -319,7 +410,8 @@ class VideoLoopFinder:
                 f"end frame index: {self.end_frame_idx}\n"
                 "Adjust with (Shift+)Left/Right"
             )
-            ax[1].imshow(np.abs(self.start_frame - self.end_frames[0]), cmap="jet")
+            if show_frame_diff:
+                ax[1].imshow(np.abs(self.start_frame - self.end_frames[0]), cmap="jet")
 
             def key_handler(event):
                 if event.key == "left":
@@ -349,8 +441,8 @@ class VideoLoopFinder:
                     self.start_frame_idx %= self.video_duration
                     self.start_frame = self._seek(self.start_frame_idx)
                     for i, frame in enumerate(self.end_frame_cache):
-                        mad_values[i] = self._compute_pixel_difference(frame)
-                    mad_curve[0].set_ydata(mad_values)
+                        y_values[i] = self._compute_pixel_difference(frame)
+                    curve[0].set_ydata(y_values)
                     ax[0].set_title(
                         f"Start frame idx: {self.start_frame_idx}\n"
                         "Adjust with Ctrl(+Shift)+Left/Right"
@@ -371,9 +463,12 @@ class VideoLoopFinder:
                     )
                 marker[0].set_data(
                     self.end_frame_idx,
-                    mad_values[self.end_frame_idx - end_frame_range[0]],
+                    y_values[self.end_frame_idx - end_frame_range[0]],
                 )
-                ax[1].imshow(np.abs(self.start_frame - self.end_frames[0]), cmap="jet")
+                if show_frame_diff:
+                    ax[1].imshow(
+                        np.abs(self.start_frame - self.end_frames[0]), cmap="jet"
+                    )
                 fig.canvas.draw()
 
             fig.canvas.mpl_connect("key_press_event", key_handler)
@@ -526,6 +621,7 @@ if __name__ == "__main__":
             "START_FRAME_IDX": Or(None, And(Use(int), lambda f: f >= 0)),
             "DURATION_HINT": Or(None, And(Use(int), lambda d: d > 0)),
             "--range": And(Use(int), lambda r: r >= 0),
+            "--match-brightness": And(Use(int), lambda r: r >= 0),
             "--width": And(Use(int), lambda w: w >= 0),
             "--flow-filter": Or(
                 And(lambda f: f.lower().strip() == "off", Use(lambda f: None)),
@@ -561,12 +657,18 @@ if __name__ == "__main__":
         duration_hint=opts["DURATION_HINT"],
         resolution=opts["--width"],
         flow_filter_threshold=opts["--flow-filter"],
+        match_brightness_range=opts["--match-brightness"],
         debug=opts["--debug"],
         interactive=opts["--interactive"],
     )
+
     start_frame_idx, end_frame_idx = vlf.find_closest_end_frame(
         search_range=opts["--range"]
     )
+
+    if opts["--match-brightness"] > 0:
+        vlf.match_brightness()
+        start_frame_idx, end_frame_idx = vlf.find_closest_end_frame(search_range=2)
 
     end_frame_position = vlf.localise_end_frame()
 
